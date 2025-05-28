@@ -18,15 +18,20 @@ include_directories(
 link_directories(
 	SYSTEM ${CMAKE_CURRENT_SOURCE_DIR}/src/lib
 )
+link_directories(
+	SYSTEM ${CMAKE_CURRENT_SOURCE_DIR}/src/dlls
+)
 
-file(GLOB ASSETS "./src/lib")
+file(GLOB LIB "./src/lib")
+file(GLOB DLL "./src/dlls/*")
 
-file(COPY ${ASSETS} DESTINATION ${CMAKE_BINARY_DIR})
+file(COPY ${LIB} DESTINATION ${CMAKE_BINARY_DIR})
+file(COPY ${DLL} DESTINATION ${CMAKE_BINARY_DIR})
 
 # 包含子项目。
 add_subdirectory (func)
 
 add_executable (GLstudy "main.cpp" "src/glad.c")
 
-target_link_libraries(GLstudy glfw3.lib)
+target_link_libraries(GLstudy PRIVATE glfw3 assimp-vc143-mt)
 

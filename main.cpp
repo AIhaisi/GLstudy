@@ -1,11 +1,19 @@
 #include <iostream>
+#include <vector>
+#include <filesystem>
+#include <direct.h>
+#include <windows.h>
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
+#include <assimp/Importer.hpp>
+#include <assimp/scene.h>
+#include <assimp/postprocess.h>
 
 using namespace std;
+
 
 // 顶点着色器
 const char* vertexShaderSource = R"glsl(
@@ -197,8 +205,8 @@ float quadVertices[] = {
 };
 
 // 摄像机参数
-glm::vec3 cameraPos = glm::vec3(5.0f, 3.0f, 10.0f);
-glm::vec3 cameraFront = glm::vec3(-0.3f, -0.2f, -0.8f);
+glm::vec3 cameraPos = glm::vec3(0.0f, 0.0f, 15.0f);
+glm::vec3 cameraFront = glm::vec3(0.0f, 0.0f, -1.0f);
 glm::vec3 cameraUp = glm::vec3(0.0f, 1.0f, 0.0f);
 
 // 鼠标控制变量
@@ -212,6 +220,51 @@ float fov = 45.0f;
 // 帧时间控制
 float deltaTime = 0.0f;
 float lastFrame = 0.0f;
+
+struct Mesh {
+    std::vector<float> vertices;
+    unsigned int VAO, VBO;
+};
+
+bool loadModel(const std::string& path, Mesh& mesh) {
+    Assimp::Importer importer;
+    const aiScene* scene = importer.ReadFile(
+        path,
+        aiProcess_Triangulate | aiProcess_FlipUVs | aiProcess_GenNormals
+    );
+
+    if (!scene || scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE || !scene->mRootNode) {
+        std::cerr << "Assimp 加载模型失败: " << importer.GetErrorString() << std::endl;
+        return false;
+    }
+
+    // 遍历所有网格
+    for (unsigned int i = 0; i < scene->mNumMeshes; i++) {
+        aiMesh* aiMesh = scene->mMeshes[i];
+        for (unsigned int j = 0; j < aiMesh->mNumFaces; j++) {
+            aiFace face = aiMesh->mFaces[j];
+            for (unsigned int k = 0; k < face.mNumIndices; k++) {
+                unsigned int index = face.mIndices[k];
+                mesh.vertices.push_back(aiMesh->mVertices[index].x);
+                mesh.vertices.push_back(aiMesh->mVertices[index].y);
+                mesh.vertices.push_back(aiMesh->mVertices[index].z);
+            }
+        }
+    }
+
+    // 创建 VAO/VBO
+    glGenVertexArrays(1, &mesh.VAO);
+    glGenBuffers(1, &mesh.VBO);
+
+    glBindVertexArray(mesh.VAO);
+    glBindBuffer(GL_ARRAY_BUFFER, mesh.VBO);
+    glBufferData(GL_ARRAY_BUFFER, mesh.vertices.size() * sizeof(float), mesh.vertices.data(), GL_STATIC_DRAW);
+
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
+
+    return true;
+}
 
 void framebuffer_size_callback(GLFWwindow* window, int width, int height)
 {
@@ -324,8 +377,19 @@ unsigned int createShaderProgram(const char* vertexSource, const char* fragmentS
     return shaderProgram;
 }
 
-int main()
-{
+int main(){
+	char path[MAX_PATH];
+	GetModuleFileNameA(NULL, path, MAX_PATH);  // 获取完整路径
+	std::cout << "可执行文件路径: " << path << std::endl;
+
+	// 提取目录部分
+	std::string dir(path);
+	size_t last_slash = dir.find_last_of("\\/");
+	if (last_slash != std::string::npos) {
+		dir = dir.substr(0, last_slash);
+	}
+	std::cout << "所在目录: " << dir << std::endl;
+
     glfwInit();
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
@@ -351,6 +415,11 @@ int main()
         cout << "Failed to initialize GLAD" << endl;
         return -1;
     }
+    Mesh teapot;
+    if (!loadModel("D:/Visual Studio/Project/GLstudy/src/source/objects/teapot/teapot.obj", teapot)) {
+        return -1;
+    }
+
 
     // 创建着色器程序
     unsigned int cubeShader = createShaderProgram(vertexShaderSource, fragmentShaderSource);
@@ -465,6 +534,19 @@ int main()
 
         glUniformMatrix4fv(glGetUniformLocation(cubeShader, "view"), 1, GL_FALSE, glm::value_ptr(view));
         glUniformMatrix4fv(glGetUniformLocation(cubeShader, "projection"), 1, GL_FALSE, glm::value_ptr(projection));
+
+        // 渲染
+        glUseProgram(cubeShader);
+        glm::mat4 model = glm::mat4(1.0f);
+        model = glm::translate(model, glm::vec3(0.0f, -3.0f, 0.0f));
+        model = glm::scale(model, glm::vec3(0.5f));
+     /*   model = glm::rotate(model, (float)glfwGetTime(), glm::vec3(0.0f, 1.0f, 0.0f));*/
+
+        glUniformMatrix4fv(glGetUniformLocation(cubeShader, "model"), 1, GL_FALSE, glm::value_ptr(model));
+        glUniform3fv(glGetUniformLocation(cubeShader, "color"), 1, glm::value_ptr(glm::vec3(0.8f, 0.3f, 0.2f)));
+
+        glBindVertexArray(teapot.VAO);
+        glDrawArrays(GL_TRIANGLES, 0, teapot.vertices.size() / 3);
 
         // 绘制6x6共36个立方体
         glBindVertexArray(cubeVAO);

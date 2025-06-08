@@ -10,6 +10,7 @@ if (POLICY CMP0141)
 endif()
 
 project ("GLstudy")
+project ("GLtest")
 
 include_directories(
 	SYSTEM ${CMAKE_CURRENT_SOURCE_DIR}/src/include
@@ -32,6 +33,7 @@ file(COPY ${DLL} DESTINATION ${CMAKE_BINARY_DIR})
 add_subdirectory (func)
 
 add_executable (GLstudy "main.cpp" "src/glad.c")
+add_executable (GLtest "test.cpp" "src/glad.c" "src/stb_image.cpp")
 
 target_link_libraries(GLstudy PRIVATE glfw3 assimp-vc143-mt)
-
+target_link_libraries(GLtest PRIVATE glfw3 assimp-vc143-mt)

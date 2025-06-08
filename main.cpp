@@ -141,6 +141,145 @@ void main()
 }
 )glsl";
 
+// PBR顶点着色器
+const char* pbrVertexShaderSource = R"glsl(
+#version 330 core
+layout (location = 0) in vec3 aPos;
+layout (location = 1) in vec3 aNormal;
+layout (location = 2) in vec2 aTexCoords;
+
+out vec3 FragPos;
+out vec3 Normal;
+out vec2 TexCoords;
+
+uniform mat4 model;
+uniform mat4 view;
+uniform mat4 projection;
+
+void main()
+{
+    FragPos = vec3(model * vec4(aPos, 1.0));
+    Normal = mat3(transpose(inverse(model))) * aNormal;  
+    TexCoords = aTexCoords;
+    gl_Position = projection * view * model * vec4(aPos, 1.0);
+}
+)glsl";
+
+// PBR片段着色器
+const char* pbrFragmentShaderSource = R"glsl(
+#version 330 core
+out vec4 FragColor;
+
+in vec3 FragPos;
+in vec3 Normal;
+in vec2 TexCoords;
+
+// 材质参数
+uniform vec3 albedo;
+uniform float metallic;
+uniform float roughness;
+uniform float ao;
+
+// 光照参数
+uniform vec3 lightPositions[4];
+uniform vec3 lightColors[4];
+uniform vec3 viewPos;
+
+const float PI = 3.14159265359;
+
+float DistributionGGX(vec3 N, vec3 H, float roughness)
+{
+    float a = roughness*roughness;
+    float a2 = a*a;
+    float NdotH = max(dot(N, H), 0.0);
+    float NdotH2 = NdotH*NdotH;
+
+    float nom   = a2;
+    float denom = (NdotH2 * (a2 - 1.0) + 1.0);
+    denom = PI * denom * denom;
+
+    return nom / denom;
+}
+
+float GeometrySchlickGGX(float NdotV, float roughness)
+{
+    float r = (roughness + 1.0);
+    float k = (r*r) / 8.0;
+
+    float nom   = NdotV;
+    float denom = NdotV * (1.0 - k) + k;
+
+    return nom / denom;
+}
+
+float GeometrySmith(vec3 N, vec3 V, vec3 L, float roughness)
+{
+    float NdotV = max(dot(N, V), 0.0);
+    float NdotL = max(dot(N, L), 0.0);
+    float ggx2 = GeometrySchlickGGX(NdotV, roughness);
+    float ggx1 = GeometrySchlickGGX(NdotL, roughness);
+
+    return ggx1 * ggx2;
+}
+
+vec3 fresnelSchlick(float cosTheta, vec3 F0)
+{
+    return F0 + (1.0 - F0) * pow(1.0 - cosTheta, 5.0);
+}
+
+void main()
+{
+    vec3 N = normalize(Normal);
+    vec3 V = normalize(viewPos - FragPos);
+
+    // 计算F0
+    vec3 F0 = vec3(0.04); 
+    F0 = mix(F0, albedo, metallic);
+
+    // 反射方程
+    vec3 Lo = vec3(0.0);
+    for(int i = 0; i < 4; ++i) 
+    {
+        // 计算每个光源
+        vec3 L = normalize(lightPositions[i] - FragPos);
+        vec3 H = normalize(V + L);
+        float distance = length(lightPositions[i] - FragPos);
+        float attenuation = 1.0 / (distance * distance);
+        vec3 radiance = lightColors[i] * attenuation;
+
+        // Cook-Torrance BRDF
+        float NDF = DistributionGGX(N, H, roughness);   
+        float G   = GeometrySmith(N, V, L, roughness);    
+        vec3 F    = fresnelSchlick(max(dot(H, V), 0.0), F0);
+        
+        vec3 kS = F;
+        vec3 kD = vec3(1.0) - kS;
+        kD *= 1.0 - metallic;	  
+        
+        vec3 numerator    = NDF * G * F;
+        float denominator = 4.0 * max(dot(N, V), 0.0) * max(dot(N, L), 0.0) + 0.0001;
+        vec3 specular     = numerator / denominator;
+            
+        // 计算每个光源的贡献
+        float NdotL = max(dot(N, L), 0.0);        
+        Lo += (kD * albedo / PI + specular) * radiance * NdotL;
+    }
+    
+    // 环境光
+    vec3 ambient = vec3(0.03) * albedo * ao;
+    vec3 color = ambient + Lo;
+
+    // HDR色调映射
+    color = color / (color + vec3(1.0));
+    // Gamma校正
+    color = pow(color, vec3(1.0/2.2)); 
+
+    FragColor = vec4(color, 1.0);
+}
+)glsl";
+
+
+
 // 立方体顶点数据
 float cubeVertices[] = {
     // 后面
@@ -190,6 +329,13 @@ float cubeVertices[] = {
       0.5f,  0.5f,  0.5f,
      -0.5f,  0.5f,  0.5f,
      -0.5f, 0.5f, -0.5f
+};
+
+float vertices[] = {
+	// 位置             // 法线           // 纹理坐标
+	-0.5f, -0.5f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f,  // 左下
+	 0.5f, -0.5f, 0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 0.0f,  // 右下
+	 0.0f,  0.5f, 0.0f, 0.0f, 0.0f, 1.0f, 0.5f, 1.0f   // 顶部
 };
 
 // 用于全屏渲染的四边形
@@ -426,6 +572,8 @@ int main(){
     unsigned int screenShader = createShaderProgram(screenVertexShaderSource, screenFragmentShaderSource);
     unsigned int blurShader = createShaderProgram(screenVertexShaderSource, blurFragmentShaderSource);
     unsigned int brightShader = createShaderProgram(screenVertexShaderSource, brightFragmentShaderSource);
+	// 创建PBR着色器程序
+	unsigned int pbrShader = createShaderProgram(pbrVertexShaderSource, pbrFragmentShaderSource);
 
     // 设置立方体VAO/VBO
     unsigned int cubeVAO, cubeVBO;
@@ -452,6 +600,30 @@ int main(){
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));
     glEnableVertexAttribArray(1);
+
+	// 设置三角形VAO/VBO
+	unsigned int verticeVAO, verticeVBO;
+	glGenVertexArrays(1, &verticeVAO);
+	glGenBuffers(1, &verticeVBO);
+
+	glBindVertexArray(verticeVAO);
+	glBindBuffer(GL_ARRAY_BUFFER, verticeVBO);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+
+	// 位置属性
+	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)0);
+	glEnableVertexAttribArray(0);
+
+	// 法线属性
+	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(3 * sizeof(float)));
+	glEnableVertexAttribArray(1);
+
+	// 纹理坐标属性
+	glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(6 * sizeof(float)));
+	glEnableVertexAttribArray(2);
+
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
+	glBindVertexArray(0);
     // 配置帧缓冲
     unsigned int hdrFBO;
     glGenFramebuffers(1, &hdrFBO);
@@ -545,12 +717,12 @@ int main(){
         glUniformMatrix4fv(glGetUniformLocation(cubeShader, "model"), 1, GL_FALSE, glm::value_ptr(model));
         glUniform3fv(glGetUniformLocation(cubeShader, "color"), 1, glm::value_ptr(glm::vec3(0.8f, 0.3f, 0.2f)));
 
-        glBindVertexArray(teapot.VAO);
-        glDrawArrays(GL_TRIANGLES, 0, teapot.vertices.size() / 3);
+		glBindVertexArray(teapot.VAO);
+		glDrawArrays(GL_TRIANGLES, 0, teapot.vertices.size() / 3);
 
         // 绘制6x6共36个立方体
         glBindVertexArray(cubeVAO);
-        for (int i = 0; i < 6; ++i)
+        for (int i = 0; i < 1; ++i)
         {
             for (int j = 0; j < 6; ++j)
             {
@@ -585,6 +757,28 @@ int main(){
                 glDrawArrays(GL_TRIANGLES, 0, 36);
             }
         }
+
+		// 设置光照
+		glm::vec3 lightPositions[] = {
+			glm::vec3(-10.0f,  10.0f, 10.0f),
+			glm::vec3(10.0f,  10.0f, 10.0f),
+			glm::vec3(-10.0f, -10.0f, 10.0f),
+			glm::vec3(10.0f, -10.0f, 10.0f)
+		};
+		glm::vec3 lightColors[] = {
+			glm::vec3(300.0f, 300.0f, 300.0f),
+			glm::vec3(300.0f, 300.0f, 300.0f),
+			glm::vec3(300.0f, 300.0f, 300.0f),
+			glm::vec3(300.0f, 300.0f, 300.0f)
+		};
+		glUniform3fv(glGetUniformLocation(pbrShader, "lightPositions"), 4, glm::value_ptr(lightPositions[0]));
+		glUniform3fv(glGetUniformLocation(pbrShader, "lightColors"), 4, glm::value_ptr(lightColors[0]));
+		glUniform3fv(glGetUniformLocation(pbrShader, "viewPos"), 1, glm::value_ptr(cameraPos));
+
+		// 设置视图和投影矩阵
+		glUniformMatrix4fv(glGetUniformLocation(pbrShader, "view"), 1, GL_FALSE, glm::value_ptr(view));
+		glUniformMatrix4fv(glGetUniformLocation(pbrShader, "projection"), 1, GL_FALSE, glm::value_ptr(projection));
+
 
         // 2. 提取高光部分到第二个颜色缓冲
         glBindFramebuffer(GL_FRAMEBUFFER, pingpongFBO[0]);

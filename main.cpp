@@ -1,7 +1,7 @@
 #include <iostream>
 #include <vector>
-#include <filesystem>
 #include <direct.h>
+#include <algorithm>
 #include <windows.h>
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
@@ -11,9 +11,6 @@
 #include <assimp/Importer.hpp>
 #include <assimp/scene.h>
 #include <assimp/postprocess.h>
-
-using namespace std;
-
 
 // 顶点着色器
 const char* vertexShaderSource = R"glsl(
@@ -523,18 +520,56 @@ unsigned int createShaderProgram(const char* vertexSource, const char* fragmentS
     return shaderProgram;
 }
 
-int main(){
+using namespace std;
+
+std::string getExecutablePath() {
 	char path[MAX_PATH];
 	GetModuleFileNameA(NULL, path, MAX_PATH);  // 获取完整路径
-	std::cout << "可执行文件路径: " << path << std::endl;
+	return std::string(path);
+}
 
-	// 提取目录部分
-	std::string dir(path);
-	size_t last_slash = dir.find_last_of("\\/");
-	if (last_slash != std::string::npos) {
-		dir = dir.substr(0, last_slash);
+std::string getProjectRoot(const std::string& exePath) {
+	std::string path = exePath;
+
+	// 替换所有反斜杠为斜杠（统一格式）
+	std::replace(path.begin(), path.end(), '\\', '/');
+
+	// 从路径末尾逐级向上查找 "GLstudy"
+	size_t pos = path.rfind("GLstudy/");
+	if (pos != std::string::npos) {
+		return path.substr(0, pos + 8);  // 包含 "GLstudy/"
 	}
-	std::cout << "所在目录: " << dir << std::endl;
+
+	// 如果未找到，尝试手动回溯（适用于非标准构建目录）
+	while (true) {
+		size_t lastSlash = path.find_last_of('/');
+		if (lastSlash == std::string::npos) break;
+		path = path.substr(0, lastSlash);
+		if (path.size() < 3) break;  // 避免无限循环
+
+		// 检查当前目录名是否为 "GLstudy"
+		size_t parentSlash = path.find_last_of('/');
+		std::string dirName = path.substr(parentSlash + 1);
+		if (dirName == "GLstudy") {
+			return path + "/";
+		}
+	}
+
+	throw std::runtime_error("无法定位项目根目录（GLstudy）");
+}
+
+std::string getResourcePath(const std::string& relativePath) {
+	std::string exePath = getExecutablePath();
+	std::string projectRoot = getProjectRoot(exePath);
+
+	// 统一使用正斜杠（兼容Windows/Linux）
+	std::string fullPath = projectRoot + "src/" + relativePath;
+	std::replace(fullPath.begin(), fullPath.end(), '\\', '/');
+	return fullPath;
+}
+
+
+int main(){
 
     glfwInit();
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
@@ -561,11 +596,14 @@ int main(){
         cout << "Failed to initialize GLAD" << endl;
         return -1;
     }
-    Mesh teapot;
-    if (!loadModel("D:/Visual Studio/Project/GLstudy/src/source/objects/teapot/teapot.obj", teapot)) {
-        return -1;
-    }
 
+
+	std::string objPath = getResourcePath("source/objects/teapot/teapot.obj");
+	std::cout << "资源路径: " << objPath << std::endl;
+	Mesh teapot;
+	if (!loadModel(objPath, teapot)) {
+		return -1;
+	}
 
     // 创建着色器程序
     unsigned int cubeShader = createShaderProgram(vertexShaderSource, fragmentShaderSource);
